@@ -1,7 +1,29 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
+from dataclasses import dataclass
+
+@dataclass
+class User():
+    username: str
+    password: str
+    name: str
+    balance: float = 0.0
+
+    def from_json(data: dict[str, any]) -> "User":
+        return User(
+            data.get("username", ""),
+            data.get("password", ""),
+            data.get("name", ""),
+            data.get("balance", 0.0)
+        )
 
 app = Flask(__name__)
 app.secret_key = "retro-bank-secret-key"
+
+users: list[User] = [
+    User("test", "test", "Nutzer 1", 1337.42),
+    User("user", "user", "Hallo Welt", 2.12),
+    User("root", "root", "MEnsch 1", 1.42)
+]
 
 USER_CREDENTIALS = {
     "username": "test",
@@ -21,6 +43,13 @@ CURRENCY_RATES_2000 = {
 }
 
 
+def match_user(username: str, password: str) -> User | None:
+    for user in users:
+        if username == user.username and password == user.password:
+            return user
+    return None
+
+
 def is_authenticated() -> bool:
     return session.get("logged_in", False)
 
@@ -37,12 +66,10 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-
-        if (
-            username == USER_CREDENTIALS["username"]
-            and password == USER_CREDENTIALS["password"]
-        ):
+        user = match_user(username, password)
+        if user:
             session["logged_in"] = True
+            session["user"] = user
             flash("Erfolgreich angemeldet!", "success")
             return redirect(url_for("account"))
 
@@ -56,11 +83,12 @@ def login():
 
 @app.route("/account")
 def account():
-    if not is_authenticated():
+    if not is_authenticated() or not session.get("user"):
         flash("Bitte melden Sie sich zuerst an.", "error")
         return redirect(url_for("login"))
+    user: User = User.from_json(session.get("user"))
 
-    balance_usd = USER_CREDENTIALS["balance"]
+    balance_usd = user.balance
     converted_balances = [
         {
             "code": code,
@@ -75,7 +103,7 @@ def account():
     return render_template(
         "account.html",
         balance=balance_usd,
-        username=USER_CREDENTIALS["username"],
+        username=user.name,
         base_currency="USD",
         conversions=sorted(converted_balances, key=lambda entry: entry["code"]),
     )
