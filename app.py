@@ -25,12 +25,6 @@ users: list[User] = [
     User("root", "root", "MEnsch 1", 1.42)
 ]
 
-USER_CREDENTIALS = {
-    "username": "test",
-    "password": "test",
-    "balance": 1337.42,
-}
-
 # Wechselkurse aus dem Jahr 2000 (ca.) pro 1 US-Dollar
 CURRENCY_RATES_2000 = {
     "DEM": {"name": "Deutsche Mark", "per_usd": 2.04, "symbol": "DM"},
