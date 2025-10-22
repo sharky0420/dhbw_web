@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Retro Bank Login</title>
+    <style>
+      body {
+        background: #0a2342 url("https://i.imgur.com/RVq9R5K.gif") repeat;
+        font-family: "Times New Roman", serif;
+        color: #f8f8f2;
+        margin: 0;
+        padding: 0;
+        text-align: center;
+      }
+
+      .container {
+        width: 640px;
+        margin: 80px auto;
+        border: 4px double #f8f8f2;
+        padding: 20px;
+        background-color: rgba(10, 35, 66, 0.92);
+        box-shadow: 8px 8px 0 #040f1f;
+      }
+
+      h1 {
+        font-size: 48px;
+        margin-bottom: 0;
+        letter-spacing: 4px;
+      }
+
+      marquee {
+        margin: 10px 0 30px;
+        color: #ffd700;
+        font-size: 20px;
+        font-weight: bold;
+      }
+
+      form {
+        display: inline-block;
+        text-align: left;
+        background-color: #09162a;
+        padding: 20px;
+        border: 3px ridge #f8f8f2;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 10px;
+        font-size: 20px;
+      }
+
+      input[type="text"],
+      input[type="password"] {
+        width: 260px;
+        padding: 8px;
+        border: 2px inset #cccccc;
+        background-color: #222;
+        color: #fff;
+      }
+
+      input[type="submit"] {
+        margin-top: 20px;
+        padding: 10px 20px;
+        border: 2px outset #ffffff;
+        background-color: #0d5cad;
+        color: #fff;
+        font-size: 18px;
+        cursor: pointer;
+      }
+
+      .messages {
+        margin: 15px auto;
+        width: 400px;
+        text-align: center;
+      }
+
+      .messages p {
+        border: 2px solid #ffd700;
+        background: rgba(255, 215, 0, 0.2);
+        padding: 10px;
+      }
+
+      .messages p.error {
+        border-color: #ff4f4f;
+        background: rgba(255, 79, 79, 0.2);
+      }
+
+      .messages p.info {
+        border-color: #87ceeb;
+        background: rgba(135, 206, 235, 0.2);
+      }
+
+      .messages p.success {
+        border-color: #7fff00;
+        background: rgba(127, 255, 0, 0.2);
+      }
+
+      footer {
+        margin-top: 40px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>DH&nbsp;BW&nbsp;Bank</h1>
+      <marquee behavior="scroll" direction="left"
+        >Willkommen beim ultimativen Online-Banking der Zukunft!</marquee
+      >
+      <div class="messages">
+        {% with messages = get_flashed_messages(with_categories=true) %} {% if messages %}
+        {% for category, message in messages %}
+        <p class="{{ category }}">{{ message }}</p>
+        {% endfor %} {% endif %} {% endwith %}
+      </div>
+      <form action="{{ url_for('login') }}" method="post">
+        <label for="username">Benutzername</label>
+        <input type="text" name="username" id="username" required />
+
+        <label for="password">Passwort</label>
+        <input type="password" name="password" id="password" required />
+
+        <input type="submit" value="Einloggen" />
+      </form>
+      <footer>&copy; 1998 DHBW Retro Banking Corporation</footer>
+    </div>
+  </body>
+</html>
