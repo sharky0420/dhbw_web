@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Retro Bank Konto</title>
+    <style>
+      body {
+        background: #08111f url("https://i.imgur.com/TO9W9au.gif") repeat;
+        font-family: "Courier New", monospace;
+        color: #00ff9c;
+        margin: 0;
+        padding: 0;
+        text-align: center;
+      }
+
+      .container {
+        width: 700px;
+        margin: 60px auto;
+        border: 5px groove #00ff9c;
+        padding: 20px;
+        background-color: rgba(5, 15, 30, 0.95);
+        box-shadow: 10px 10px 0 #000;
+      }
+
+      h1 {
+        font-size: 46px;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+      }
+
+      .ticker {
+        background: #00008b;
+        color: #ffff00;
+        padding: 8px;
+        border: 3px outset #ffff00;
+        margin-bottom: 30px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 30px;
+      }
+
+      th,
+      td {
+        border: 2px solid #00ff9c;
+        padding: 10px;
+        font-size: 20px;
+      }
+
+      .balance {
+        font-size: 36px;
+        font-weight: bold;
+        color: #ff69b4;
+        text-shadow: 2px 2px 0 #000;
+      }
+
+      a {
+        color: #ffff00;
+        text-decoration: underline;
+        font-size: 18px;
+      }
+
+      a:hover {
+        color: #ffffff;
+      }
+
+      footer {
+        margin-top: 20px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Willkommen, {{ username }}!</h1>
+      <div class="ticker">
+        <strong>Breaking News:</strong> Unsere Bank ist 100% Y2K-sicher!
+      </div>
+      <table>
+        <tr>
+          <th colspan="2">Kontoübersicht</th>
+        </tr>
+        <tr>
+          <td>Kontoinhaber</td>
+          <td>{{ username }}</td>
+        </tr>
+        <tr>
+          <td>Kontostand</td>
+          <td class="balance">{{ "%.2f" | format(balance) }}&nbsp;€</td>
+        </tr>
+      </table>
+      <p>
+        <a href="{{ url_for('logout') }}">Abmelden und zum Startbildschirm zurückkehren</a>
+      </p>
+      <footer>Danke, dass Sie mit DHBW Retro Banking die Zukunft erleben.</footer>
+    </div>
+  </body>
+</html>
