@@ -9,6 +9,17 @@ USER_CREDENTIALS = {
     "balance": 1337.42,
 }
 
+# Wechselkurse aus dem Jahr 2000 (ca.) pro 1 US-Dollar
+CURRENCY_RATES_2000 = {
+    "DEM": {"name": "Deutsche Mark", "per_usd": 2.04, "symbol": "DM"},
+    "FRF": {"name": "Französischer Franc", "per_usd": 6.75, "symbol": "F"},
+    "ITL": {"name": "Italienische Lira", "per_usd": 2031.00, "symbol": "₤"},
+    "ESP": {"name": "Spanische Peseta", "per_usd": 170.00, "symbol": "₧"},
+    "ATS": {"name": "Österreichischer Schilling", "per_usd": 14.20, "symbol": "S"},
+    "NLG": {"name": "Niederländischer Gulden", "per_usd": 2.18, "symbol": "ƒ"},
+    "BEF": {"name": "Belgischer Franc", "per_usd": 41.00, "symbol": "FB"},
+}
+
 
 def is_authenticated() -> bool:
     return session.get("logged_in", False)
@@ -49,10 +60,24 @@ def account():
         flash("Bitte melden Sie sich zuerst an.", "error")
         return redirect(url_for("login"))
 
+    balance_usd = USER_CREDENTIALS["balance"]
+    converted_balances = [
+        {
+            "code": code,
+            "name": data["name"],
+            "value": balance_usd * data["per_usd"],
+            "symbol": data["symbol"],
+            "rate": data["per_usd"],
+        }
+        for code, data in CURRENCY_RATES_2000.items()
+    ]
+
     return render_template(
         "account.html",
-        balance=USER_CREDENTIALS["balance"],
+        balance=balance_usd,
         username=USER_CREDENTIALS["username"],
+        base_currency="USD",
+        conversions=sorted(converted_balances, key=lambda entry: entry["code"]),
     )
 
 
