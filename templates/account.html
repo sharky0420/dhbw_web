@@ -66,6 +66,32 @@
         color: #ffffff;
       }
 
+      .converter {
+        margin: 30px 0;
+        padding: 20px;
+        border: 3px dashed #00ff9c;
+        background-color: rgba(0, 20, 40, 0.8);
+      }
+
+      .converter label {
+        font-size: 18px;
+        margin-right: 10px;
+      }
+
+      .converter select {
+        font-size: 18px;
+        padding: 6px 12px;
+        border: 2px solid #ff69b4;
+        background-color: #08111f;
+        color: #00ff9c;
+      }
+
+      .converter small {
+        display: block;
+        margin-top: 12px;
+        color: #7fffd4;
+      }
+
       footer {
         margin-top: 20px;
         font-size: 14px;
@@ -88,13 +114,62 @@
         </tr>
         <tr>
           <td>Kontostand</td>
-          <td class="balance">{{ "%.2f" | format(balance) }}&nbsp;€</td>
+          <td class="balance">{{ "%.2f" | format(balance) }}&nbsp;{{ base_currency }}</td>
         </tr>
       </table>
+      <div class="ticker">
+        <strong>Währungsmodus:</strong> 1&nbsp;US-Dollar als Standard (Stand 2000).
+      </div>
+      <div class="converter">
+        <label for="currency-select">Währung wählen:</label>
+        <select id="currency-select">
+          <option
+            value="USD"
+            data-rate="1"
+            data-symbol="US$"
+            selected
+          >
+            US-Dollar (USD)
+          </option>
+          {% for currency in conversions %}
+          <option
+            value="{{ currency.code }}"
+            data-rate="{{ currency.rate }}"
+            data-symbol="{{ currency.symbol }}"
+          >
+            {{ currency.name }} ({{ currency.code }})
+          </option>
+          {% endfor %}
+        </select>
+        <div id="converted-balance" class="balance"></div>
+        <small>Historische Kurse ca. Jahr 2000, vor der Einführung des Euro.</small>
+      </div>
       <p>
         <a href="{{ url_for('logout') }}">Abmelden und zum Startbildschirm zurückkehren</a>
       </p>
       <footer>Danke, dass Sie mit DHBW Retro Banking die Zukunft erleben.</footer>
     </div>
+    <script>
+      const baseBalance = {{ balance | tojson }};
+      const currencySelect = document.getElementById("currency-select");
+      const display = document.getElementById("converted-balance");
+
+      const formatNumber = (value) =>
+        new Intl.NumberFormat("de-DE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(value);
+
+      const renderBalance = () => {
+        const option = currencySelect.selectedOptions[0];
+        const rate = Number(option.dataset.rate);
+        const symbol = option.dataset.symbol;
+        const converted = baseBalance * rate;
+        display.textContent = `${formatNumber(converted)} ${symbol}`;
+      };
+
+      currencySelect.addEventListener("change", renderBalance);
+      renderBalance();
+    </script>
   </body>
 </html>
