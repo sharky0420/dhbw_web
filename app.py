@@ -184,7 +184,15 @@ def create_two_factor_code() -> str:
     return code
 
 
+def _normalize_code(code: str) -> str:
+    """Normalize a user supplied 2FA code to digits only."""
+
+    return "".join(ch for ch in code if ch.isdigit())
+
+
 def validate_two_factor_code(code: str) -> bool:
+    code = _normalize_code(code)
+
     stored_code = session.get("two_factor_code")
     created_raw = session.get("two_factor_created")
     if not stored_code or not created_raw:
@@ -237,7 +245,11 @@ def two_factor():
 
     if request.method == "POST":
         code = request.form.get("code", "")
-        if validate_two_factor_code(code):
+        normalized_code = _normalize_code(code)
+        if len(normalized_code) != 6:
+            flash("Bitte geben Sie einen gültigen 6-stelligen Code ein.", "error")
+            return render_template("two_factor.html", demo_code=session.get("demo_code"))
+        if validate_two_factor_code(normalized_code):
             session.pop("two_factor_code", None)
             session.pop("two_factor_created", None)
             session.pop("demo_code", None)
