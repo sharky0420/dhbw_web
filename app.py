@@ -93,6 +93,16 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
+
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_id INTEGER NOT NULL,
+                recipient_id INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (sender_id) REFERENCES users(id),
+                FOREIGN KEY (recipient_id) REFERENCES users(id)
+            );
             """
         )
 
@@ -296,6 +306,54 @@ def account():
             db.execute("SELECT COUNT(*) FROM appointments WHERE user_id = ?", (user.id,))
             .fetchone()[0]
         )
+        account_rows = db.execute(
+            "SELECT id, username, name FROM users WHERE id != ? ORDER BY name",
+            (user.id,),
+        ).fetchall()
+        transaction_rows = db.execute(
+            """
+            SELECT
+                t.id,
+                t.sender_id,
+                t.recipient_id,
+                t.amount,
+                t.created_at,
+                sender.name AS sender_name,
+                recipient.name AS recipient_name,
+                sender.username AS sender_username,
+                recipient.username AS recipient_username
+            FROM transactions AS t
+            LEFT JOIN users AS sender ON sender.id = t.sender_id
+            LEFT JOIN users AS recipient ON recipient.id = t.recipient_id
+            WHERE t.sender_id = ? OR t.recipient_id = ?
+            ORDER BY t.created_at DESC
+            LIMIT 10
+            """,
+            (user.id, user.id),
+        ).fetchall()
+
+    other_accounts = [dict(row) for row in account_rows]
+    transactions = []
+    for row in transaction_rows:
+        direction = "outgoing" if row["sender_id"] == user.id else "incoming"
+        counterparty_name = (
+            row["recipient_name"] if direction == "outgoing" else row["sender_name"]
+        )
+        counterparty_username = (
+            row["recipient_username"]
+            if direction == "outgoing"
+            else row["sender_username"]
+        )
+        transactions.append(
+            {
+                "id": row["id"],
+                "amount": row["amount"],
+                "created_at": row["created_at"],
+                "direction": direction,
+                "counterparty_name": counterparty_name,
+                "counterparty_username": counterparty_username,
+            }
+        )
 
     return render_template(
         "account.html",
@@ -306,6 +364,8 @@ def account():
         cards=user.cards or [],
         feedback_count=feedback_count,
         appointment_count=appointment_count,
+        other_accounts=other_accounts,
+        transactions=transactions,
     )
 
 
@@ -360,6 +420,139 @@ def api_feedback():
             (session["user_id"], message, dt.datetime.utcnow().isoformat()),
         )
     return jsonify({"status": "ok"}), 201
+
+
+@app.route("/api/transfer", methods=["POST"])
+def api_transfer():
+    if not is_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.json or {}
+    recipient_username = payload.get("recipient", "").strip()
+    amount_raw = payload.get("amount")
+
+    try:
+        amount = float(amount_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Ungültiger Betrag"}), 400
+
+    if math.isnan(amount) or math.isinf(amount) or amount <= 0:
+        return jsonify({"error": "Bitte geben Sie einen positiven Betrag ein."}), 400
+
+    if not recipient_username:
+        return jsonify({"error": "Bitte wählen Sie ein Zielkonto."}), 400
+
+    user_id = session["user_id"]
+
+    with get_db() as db:
+        sender_row = db.execute(
+            "SELECT id, balance FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if not sender_row:
+            return jsonify({"error": "Absenderkonto wurde nicht gefunden."}), 404
+
+        recipient_row = db.execute(
+            "SELECT id, balance, name, username FROM users WHERE username = ?",
+            (recipient_username,),
+        ).fetchone()
+
+        if not recipient_row:
+            return jsonify({"error": "Zielkonto wurde nicht gefunden."}), 404
+
+        if recipient_row["id"] == user_id:
+            return jsonify({"error": "Überweisungen an das eigene Konto sind nicht erlaubt."}), 400
+
+        sender_balance = float(sender_row["balance"])
+        if sender_balance < amount:
+            return jsonify({"error": "Unzureichendes Guthaben."}), 400
+
+        recipient_balance = float(recipient_row["balance"])
+
+        new_sender_balance = round(sender_balance - amount, 2)
+        new_recipient_balance = round(recipient_balance + amount, 2)
+        timestamp = dt.datetime.utcnow().isoformat()
+
+        db.execute(
+            "UPDATE users SET balance = ? WHERE id = ?",
+            (new_sender_balance, user_id),
+        )
+        db.execute(
+            "UPDATE users SET balance = ? WHERE id = ?",
+            (new_recipient_balance, recipient_row["id"]),
+        )
+        db.execute(
+            "INSERT INTO transactions (sender_id, recipient_id, amount, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, recipient_row["id"], amount, timestamp),
+        )
+
+    return jsonify(
+        {
+            "status": "ok",
+            "balance": new_sender_balance,
+            "recipient": {
+                "name": recipient_row["name"],
+                "username": recipient_row["username"],
+            },
+            "amount": amount,
+            "timestamp": timestamp,
+        }
+    )
+
+
+@app.route("/api/transactions")
+def api_transactions():
+    if not is_authenticated():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = session["user_id"]
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT
+                t.id,
+                t.sender_id,
+                t.recipient_id,
+                t.amount,
+                t.created_at,
+                sender.name AS sender_name,
+                recipient.name AS recipient_name,
+                sender.username AS sender_username,
+                recipient.username AS recipient_username
+            FROM transactions AS t
+            LEFT JOIN users AS sender ON sender.id = t.sender_id
+            LEFT JOIN users AS recipient ON recipient.id = t.recipient_id
+            WHERE t.sender_id = ? OR t.recipient_id = ?
+            ORDER BY t.created_at DESC
+            LIMIT 20
+            """,
+            (user_id, user_id),
+        ).fetchall()
+
+    transactions: list[dict[str, object]] = []
+    for row in rows:
+        direction = "outgoing" if row["sender_id"] == user_id else "incoming"
+        counterparty_name = (
+            row["recipient_name"] if direction == "outgoing" else row["sender_name"]
+        )
+        counterparty_username = (
+            row["recipient_username"]
+            if direction == "outgoing"
+            else row["sender_username"]
+        )
+        transactions.append(
+            {
+                "id": row["id"],
+                "amount": row["amount"],
+                "created_at": row["created_at"],
+                "direction": direction,
+                "counterparty_name": counterparty_name,
+                "counterparty_username": counterparty_username,
+            }
+        )
+
+    return jsonify({"transactions": transactions})
 
 
 @app.route("/api/appointments", methods=["GET", "POST"])

@@ -75,6 +75,10 @@
       .card-list > li:last-child {
         border-bottom: 0;
       }
+
+      .transaction-amount {
+        font-variant-numeric: tabular-nums;
+      }
     </style>
   </head>
   <body>
@@ -136,6 +140,80 @@
                 {% endfor %}
                 {% if cards|length == 0 %}
                 <li class="text-muted">Noch keine Karten hinterlegt.</li>
+                {% endif %}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="card card-glass h-100">
+            <div class="card-body">
+              <h5 class="card-title">Überweisung ausführen</h5>
+              <p class="card-subtitle text-muted mb-3">
+                Live-Transaktionen zwischen Ihren DHBW Bank Konten.
+              </p>
+              <div id="transfer-alert" class="alert d-none" role="alert"></div>
+              <div class="mb-3">
+                <label for="transfer-recipient" class="form-label">Zielkonto</label>
+                <select id="transfer-recipient" class="form-select">
+                  <option value="">Bitte wählen</option>
+                  {% for account in other_accounts %}
+                  <option value="{{ account.username }}">{{ account.name }} ({{ account.username }})</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="transfer-amount" class="form-label">Betrag (USD)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  class="form-control"
+                  id="transfer-amount"
+                  placeholder="0,00"
+                />
+              </div>
+              <button class="btn btn-success w-100" id="transfer-submit" {% if other_accounts|length == 0 %}disabled{% endif %}>
+                Überweisung senden
+              </button>
+              {% if other_accounts|length == 0 %}
+              <p class="small text-muted mt-2 mb-0">
+                Aktuell sind keine weiteren Konten verfügbar.
+              </p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="card card-glass h-100">
+            <div class="card-body">
+              <h5 class="card-title">Transaktionshistorie</h5>
+              <p class="card-subtitle text-muted mb-3">
+                Lückenlose Übersicht der letzten Überweisungen.
+              </p>
+              <ul class="list-unstyled mb-0" id="transfer-history">
+                {% if transactions %}
+                {% for tx in transactions %}
+                <li class="d-flex justify-content-between align-items-start py-2 border-bottom">
+                  <div class="me-3">
+                    <span
+                      class="badge rounded-pill {% if tx.direction == 'outgoing' %}bg-danger-subtle text-danger{% else %}bg-success-subtle text-success{% endif %}"
+                    >
+                      {% if tx.direction == 'outgoing' %}Ausgehend{% else %}Eingehend{% endif %}
+                    </span>
+                    <div class="fw-semibold">{{ tx.counterparty_name }}</div>
+                    <div class="small text-muted">{{ tx.counterparty_username }}</div>
+                    <div class="small text-muted">{{ tx.created_at }}</div>
+                  </div>
+                  <div class="text-end fw-semibold transaction-amount {% if tx.direction == 'outgoing' %}text-danger{% else %}text-success{% endif %}">
+                    {% if tx.direction == 'outgoing' %}-{% else %}+{% endif %}{{ "%.2f" | format(tx.amount) }}&nbsp;USD
+                  </div>
+                </li>
+                {% endfor %}
+                {% else %}
+                <li class="text-muted">Noch keine Transaktionen vorhanden.</li>
                 {% endif %}
               </ul>
             </div>
@@ -242,6 +320,37 @@
       const formatNumber = (value) =>
         new Intl.NumberFormat("de-DE", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 
+      const renderTransactions = (items) => {
+        const list = document.getElementById("transfer-history");
+        if (!list) {
+          return;
+        }
+        list.innerHTML = "";
+        if (!items.length) {
+          list.innerHTML = '<li class="text-muted">Noch keine Transaktionen vorhanden.</li>';
+          return;
+        }
+        items.forEach((entry) => {
+          const li = document.createElement("li");
+          li.className = "d-flex justify-content-between align-items-start py-2 border-bottom";
+          const badgeClass = entry.direction === "outgoing" ? "bg-danger-subtle text-danger" : "bg-success-subtle text-success";
+          const amountPrefix = entry.direction === "outgoing" ? "-" : "+";
+          const amountClass = entry.direction === "outgoing" ? "text-danger" : "text-success";
+          li.innerHTML = `
+            <div class="me-3">
+              <span class="badge rounded-pill ${badgeClass}">${entry.direction === "outgoing" ? "Ausgehend" : "Eingehend"}</span>
+              <div class="fw-semibold">${entry.counterparty_name}</div>
+              <div class="small text-muted">${entry.counterparty_username}</div>
+              <div class="small text-muted">${new Date(entry.created_at).toLocaleString()}</div>
+            </div>
+            <div class="text-end fw-semibold transaction-amount ${amountClass}">${amountPrefix}${formatNumber(entry.amount)}&nbsp;USD</div>`;
+          list.appendChild(li);
+        });
+      };
+
+      const initialTransactions = {{ transactions | tojson }};
+      renderTransactions(initialTransactions);
+
       async function refreshBalance() {
         try {
           const response = await fetch("{{ url_for('api_balance') }}");
@@ -270,6 +379,79 @@
         } catch (error) {
           console.error("Balance update failed", error);
         }
+      }
+
+      async function submitTransfer() {
+        const alertBox = document.getElementById("transfer-alert");
+        const amountField = document.getElementById("transfer-amount");
+        const recipientField = document.getElementById("transfer-recipient");
+        if (!alertBox || !amountField || !recipientField) {
+          return;
+        }
+
+        const rawValue = amountField.value.replace(",", ".");
+        const amount = Number(rawValue);
+        const recipient = recipientField.value;
+
+        if (!recipient) {
+          alertBox.className = "alert alert-warning";
+          alertBox.textContent = "Bitte wählen Sie ein Zielkonto.";
+          alertBox.classList.remove("d-none");
+          return;
+        }
+
+        if (!Number.isFinite(amount) || amount <= 0) {
+          alertBox.className = "alert alert-warning";
+          alertBox.textContent = "Bitte geben Sie einen gültigen Betrag ein.";
+          alertBox.classList.remove("d-none");
+          return;
+        }
+
+        const response = await fetch("{{ url_for('api_transfer') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount, recipient }),
+        });
+
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch (error) {
+          payload = {};
+        }
+
+        if (response.ok) {
+          const selectedOption = recipientField.options[recipientField.selectedIndex];
+          const fallbackName = selectedOption && selectedOption.textContent ? selectedOption.textContent : "Zielkonto";
+          const recipientName = payload && payload.recipient && payload.recipient.name
+            ? payload.recipient.name
+            : fallbackName;
+          const amountValue = Number.isFinite(payload.amount) ? payload.amount : amount;
+          alertBox.className = "alert alert-success";
+          alertBox.textContent = `Überweisung über ${formatNumber(amountValue)} USD an ${recipientName} erfolgreich.`;
+          alertBox.classList.remove("d-none");
+          amountField.value = "";
+          refreshBalance();
+          loadTransactions();
+        } else {
+          alertBox.className = "alert alert-danger";
+          alertBox.textContent = payload.error || "Überweisung fehlgeschlagen.";
+          alertBox.classList.remove("d-none");
+        }
+      }
+
+      async function loadTransactions() {
+        const response = await fetch("{{ url_for('api_transactions') }}");
+        if (!response.ok) {
+          return;
+        }
+        let data = { transactions: [] };
+        try {
+          data = await response.json();
+        } catch (error) {
+          return;
+        }
+        renderTransactions(data.transactions || []);
       }
 
       async function sendFeedback() {
@@ -387,11 +569,18 @@
         }
       });
 
+      const transferButton = document.getElementById("transfer-submit");
+      if (transferButton) {
+        transferButton.addEventListener("click", submitTransfer);
+      }
+
       refreshBalance();
       loadAppointments();
       loadChat();
+      loadTransactions();
       setInterval(refreshBalance, 5000);
       setInterval(loadChat, 8000);
+      setInterval(loadTransactions, 8000);
     </script>
   </body>
 </html>
