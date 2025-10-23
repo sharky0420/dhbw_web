@@ -1,7 +1,7 @@
 FROM python:latest
 EXPOSE 80
 
-ENV bank_db_path/var/data/database.db
+ENV BANK_DB_PATH=/var/data/database.db
 
 WORKDIR /usr/local/app
 
