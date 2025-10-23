@@ -70,12 +70,14 @@
               id="code"
               name="code"
               class="form-control form-control-lg text-center"
-              pattern="\\d{6}"
+              pattern="[0-9]{6}"
               maxlength="6"
               inputmode="numeric"
+              autocomplete="one-time-code"
               placeholder="••••••"
               required
             />
+
             <div class="invalid-feedback">Bitte geben Sie den 6-stelligen Code ein.</div>
           </div>
           <div class="d-grid">
@@ -91,18 +93,24 @@
       (() => {
         "use strict";
         const forms = document.querySelectorAll(".needs-validation");
+        const codeInput = document.getElementById("code");
+
+        if (codeInput) {
+          codeInput.addEventListener("input", () => {
+            codeInput.value = codeInput.value.replace(/\D+/g, "").slice(0, 6);
+          });
+        }
+
         Array.from(forms).forEach((form) => {
-          form.addEventListener(
-            "submit",
-            (event) => {
-              if (!form.checkValidity()) {
-                event.preventDefault();
-                event.stopPropagation();
-              }
-              form.classList.add("was-validated");
-            },
-            false
-          );
+          form.addEventListener("submit", (event) => {
+            // Trim vor der Validierung
+            if (codeInput) codeInput.value = codeInput.value.trim();
+            if (!form.checkValidity()) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+            form.classList.add("was-validated");
+          }, false);
         });
       })();
     </script>
