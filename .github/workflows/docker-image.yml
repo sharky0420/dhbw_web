@@ -26,7 +26,7 @@ jobs:
     - name: Install sshpass
       run: sudo apt-get update && sudo apt-get install -y sshpass
     - name: Install lftp
-      run: apt-get install lftp && apt install rsync
+      run: apt-get install -y lftp && apt install -y rsync
 
     - name: connect and pull
       run: sshpass -p "${{ secrets.SSH_PRIVATE_KEY }}" \
