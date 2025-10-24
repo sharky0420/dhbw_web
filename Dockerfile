@@ -14,6 +14,6 @@ RUN pip install flask
 RUN pip install gunicorn
 
 
-
+RUN mkdir /var/data
 
 CMD ["gunicorn", "--bind", "0.0.0.0:80", "wsgi:flask_app"]
