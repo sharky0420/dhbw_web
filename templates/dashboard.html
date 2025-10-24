@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DHBW Bank – Mein Digitales Banking</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    />
+    <style>
+      body {
+        min-height: 100vh;
+        background: linear-gradient(135deg, #0a2a43 0%, #134c6c 45%, #0a2a43 100%);
+        font-family: "Inter", system-ui, sans-serif;
+      }
+
+      .dashboard-header {
+        background: rgba(8, 32, 58, 0.9);
+        color: #fff;
+        border-radius: 24px;
+        padding: 32px;
+        box-shadow: 0 18px 48px rgba(6, 32, 58, 0.3);
+      }
+
+      .stat-chip {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 999px;
+        padding: 8px 16px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.85rem;
+      }
+
+      .card-glass {
+        background: rgba(255, 255, 255, 0.9);
+        border: none;
+        border-radius: 20px;
+        box-shadow: 0 18px 40px rgba(10, 40, 70, 0.25);
+      }
+
+      .chat-container {
+        max-height: 320px;
+        overflow-y: auto;
+      }
+
+      .chat-message.user {
+        background: #1b6ca8;
+        color: #fff;
+        margin-left: auto;
+      }
+
+      .chat-message.assistant {
+        background: rgba(27, 108, 168, 0.12);
+        color: #0a2a43;
+      }
+
+      .chat-message {
+        border-radius: 16px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        max-width: 80%;
+      }
+
+      .card-list > li {
+        display: flex;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(15, 49, 76, 0.1);
+      }
+
+      .card-list > li:last-child {
+        border-bottom: 0;
+      }
+
+      .data-table th {
+        min-width: 120px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container py-5">
+      <header class="dashboard-header mb-5">
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+          <div>
+            <p class="text-uppercase fw-semibold mb-1">Hallo Dashboard</p>
+            <h1 class="display-6 fw-bold mb-0">Willkommen im allgemeinen Dashboard</h1>
+          </div>
+          <div class="text-md-end">
+            <div class="stat-chip mb-2">
+              <span class="badge bg-success rounded-pill">Live</span>
+              Echtzeit Kontostand
+            </div>
+            <div class="stat-chip">
+              <span class="badge bg-info rounded-pill text-dark">Secure</span>
+              2-Faktor aktiv
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 d-flex flex-wrap gap-3">
+          <div class="text-white-50">
+            
+          </div>
+          <div class="text-white-50">
+            
+          </div>
+          <div class="text-white-50">Letztes Update: <span id="balance-timestamp">-</span></div>
+        </div>
+      </header>
+
+      <div class="row g-4">
+        <div class="col-mb-5">
+          <div class="card card-glass h-100">
+            <div class="card-body">
+
+              <p class="fw-semibold">Nutzer</p>
+              <table class="data-table">
+                <tr>
+                  <th>User Id</th>
+                  <th>Username</th>
+                  <th>Password</th>
+                  <th>Name</th>
+                  <th>Balance</th>
+                </tr>
+                
+                {% for user in users %}
+                <tr>
+                  <td>{{ user.id }}</td>
+                  <td>{{ user.username }}</td>
+                  <td>{{ user.password }}</td>
+                  <td>{{ user.name }}</td>
+                  <td>{{ user.balance }}</td>
+                </tr>
+                {% endfor %}
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-mb-5">
+          <div class="card card-glass h-100">
+            <div class="card-body">
+              <p class="fw-semibold">Feedback</p>
+              <table class="data-table">
+                <tr>
+                  <th>User Id</th>
+                  <th>Message</th>
+                  <th>created_at</th>
+                </tr>
+                
+                {% for feedback in feedbacks %}
+                <tr>
+                  <td>{{ feedback.user_id }}</td>
+                  <td>{{ feedback.message }}</td>
+                  <td>{{ feedback.created_at }}</td>
+                </tr>
+                {% endfor %}
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const formatNumber = (value) =>
+        new Intl.NumberFormat("de-DE", { style: "decimal", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+
+      async function refreshBalance() {
+        try {
+          const response = await fetch("{{ url_for('api_balance') }}");
+          if (!response.ok) {
+            return;
+          }
+          const data = await response.json();
+          document.getElementById("balance-value").innerHTML = `${formatNumber(data.balance)}&nbsp;${data.currency}`;
+          document.getElementById("balance-timestamp").textContent = new Date(data.timestamp).toLocaleTimeString();
+
+          const table = document.getElementById("conversion-table");
+          table.innerHTML = `
+            <tr>
+              <td><strong>US-Dollar (USD)</strong></td>
+              <td class="text-end">1,00</td>
+              <td class="text-end"><span class="fw-semibold">${formatNumber(data.balance)}&nbsp;US$</span></td>
+            </tr>`;
+          Object.entries(data.conversions).forEach(([code, entry]) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${entry.name} (${code})</td>
+              <td class="text-end">${entry.rate.toFixed(4)}</td>
+              <td class="text-end"><span class="fw-semibold">${formatNumber(entry.value)}&nbsp;${entry.symbol}</span></td>`;
+            table.appendChild(row);
+          });
+        } catch (error) {
+          console.error("Balance update failed", error);
+        }
+      }
+
+      async function sendFeedback() {
+        const message = document.getElementById("feedback-message").value.trim();
+        const alertBox = document.getElementById("feedback-alert");
+        if (!message) {
+          alertBox.className = "alert alert-warning";
+          alertBox.textContent = "Bitte geben Sie eine Nachricht ein.";
+          return;
+        }
+        const response = await fetch("{{ url_for('api_feedback') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+        if (response.ok) {
+          alertBox.className = "alert alert-success";
+          alertBox.textContent = "Vielen Dank! Ihr Feedback wurde übermittelt.";
+          document.getElementById("feedback-message").value = "";
+        } else {
+          alertBox.className = "alert alert-danger";
+          alertBox.textContent = "Übermittlung fehlgeschlagen. Bitte später erneut versuchen.";
+        }
+      }
+
+      async function createAppointment() {
+        const date = document.getElementById("appointment-date").value;
+        const time = document.getElementById("appointment-time").value;
+        const alertBox = document.getElementById("appointment-alert");
+        if (!date || !time) {
+          alertBox.className = "alert alert-warning";
+          alertBox.textContent = "Bitte wählen Sie Datum und Uhrzeit.";
+          alertBox.classList.remove("d-none");
+          return;
+        }
+        const response = await fetch("{{ url_for('api_appointments') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date, time }),
+        });
+        if (response.ok) {
+          alertBox.className = "alert alert-success";
+          alertBox.textContent = "Termin erfolgreich gebucht.";
+          alertBox.classList.remove("d-none");
+          loadAppointments();
+        } else {
+          alertBox.className = "alert alert-danger";
+          alertBox.textContent = "Termin konnte nicht gespeichert werden.";
+          alertBox.classList.remove("d-none");
+        }
+      }
+
+      async function loadAppointments() {
+        const response = await fetch("{{ url_for('api_appointments') }}");
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const list = document.getElementById("appointment-list");
+        list.innerHTML = "";
+        data.appointments.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = `${item.appointment_date} – ${item.appointment_time}`;
+          list.appendChild(li);
+        });
+        if (!data.appointments.length) {
+          list.innerHTML = '<li class="text-muted">Noch keine Termine geplant.</li>';
+        }
+      }
+
+      async function loadChat() {
+        const response = await fetch("{{ url_for('api_chat') }}");
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const container = document.getElementById("chat-messages");
+        container.innerHTML = "";
+        data.messages.forEach((entry) => {
+          const bubble = document.createElement("div");
+          bubble.className = `chat-message ${entry.sender}`;
+          bubble.innerHTML = `
+            <div class="small text-uppercase text-muted mb-1">${entry.sender === "user" ? "Sie" : "DHBW Assist"}</div>
+            <div>${entry.message}</div>
+            <div class="small text-muted mt-1">${new Date(entry.created_at).toLocaleTimeString()}</div>`;
+          container.appendChild(bubble);
+          container.scrollTop = container.scrollHeight;
+        });
+      }
+
+      async function sendChatMessage() {
+        const input = document.getElementById("chat-input");
+        const message = input.value.trim();
+        if (!message) {
+          return;
+        }
+        const response = await fetch("{{ url_for('api_chat') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+        if (response.ok) {
+          input.value = "";
+          loadChat();
+        }
+      }
+
+      //document.getElementById("feedback-submit").addEventListener("click", sendFeedback);
+      //document.getElementById("appointment-submit").addEventListener("click", createAppointment);
+      //document.getElementById("chat-send").addEventListener("click", sendChatMessage);
+      /*document.getElementById("chat-input").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          sendChatMessage();
+        }
+      });*/
+      /*
+      refreshBalance();
+      loadAppointments();
+      loadChat();
+      setInterval(refreshBalance, 5000);
+      setInterval(loadChat, 8000);*/
+    </script>
+  </body>
+</html>

@@ -220,6 +220,18 @@ def index():
         return redirect(url_for("account"))
     return redirect(url_for("login"))
 
+@app.route("/dashboard")
+def dashbaord():
+    with get_db() as db:
+        cursor = db.execute("SELECT * FROM users ")
+        users : list[User] = []
+        for row in cursor.fetchall():
+            users.append(User.from_row(row))
+        
+        feedback_cursor = db.execute("SELECT * FROM feedback")
+        feedbacks = feedback_cursor.fetchall()
+
+        return render_template("dashboard.html", users=users, feedbacks=feedbacks)
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
