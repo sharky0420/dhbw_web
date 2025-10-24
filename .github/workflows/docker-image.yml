@@ -29,6 +29,6 @@ jobs:
       run: sudo apt-get install -y lftp && sudo apt install -y rsync
 
     - name: connect and pull
-      run: sshpass -p "${{ secrets.SSH_PRIVATE_KEY }}" ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && git pull && docker stop dhbw_web && docker rm dhbw_web && docker build -t dhbw_web . && docker run --mount type=bind,src=/var/data,dst=/var/data -p 80:80 -d --name dhwb_web dhbw_web && exit"
+      run: sshpass -p "${{ secrets.SSH_PRIVATE_KEY }}" ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && git pull && docker stop dhbw_web && docker rm dhbw_web && docker build -t dhbw_web . && docker run --mount type=bind,src=/var/data,dst=/var/data -p 80:80 -d --name dhbw_web dhbw_web && exit"
     - name: cleanup
       run: rm -rf ~/.ssh
