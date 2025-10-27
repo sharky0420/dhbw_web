@@ -492,7 +492,10 @@ def init_db() -> None:
                 password TEXT NOT NULL,
                 name TEXT NOT NULL,
                 balance REAL NOT NULL DEFAULT 0.0,
-                cards TEXT
+                cards TEXT,
+                public_key TEXT UNIQUE,
+                private_key TEXT,
+                initial_balance REAL
             );
 
             CREATE TABLE IF NOT EXISTS feedback (
@@ -541,13 +544,40 @@ def init_db() -> None:
                     {"type": "Kredit", "masked": "**** **** **** 9876", "status": "Aktiv"},
                 ]
             )
+            seed_users = [
+                ("test", "test", "Nutzer 1", 1337.42, demo_cards),
+                ("user", "user", "Hallo Welt", 2.12, demo_cards),
+                ("root", "root", "MEnsch 1", 1.42, demo_cards),
+            ]
+            user_records: list[tuple[object, ...]] = []
+            for username, password, name, balance, cards in seed_users:
+                public_key, private_key = generate_key_pair()
+                user_records.append(
+                    (
+                        username,
+                        password,
+                        name,
+                        balance,
+                        cards,
+                        balance,  # initial_balance mirrors the starting balance
+                        public_key,
+                        private_key,
+                    )
+                )
             db.executemany(
-                "INSERT INTO users (username, password, name, balance, cards) VALUES (?, ?, ?, ?, ?)",
-                [
-                    ("test", "test", "Nutzer 1", 1337.42, demo_cards),
-                    ("user", "user", "Hallo Welt", 2.12, demo_cards),
-                    ("root", "root", "MEnsch 1", 1.42, demo_cards),
-                ],
+                """
+                INSERT INTO users (
+                    username,
+                    password,
+                    name,
+                    balance,
+                    cards,
+                    initial_balance,
+                    public_key,
+                    private_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                user_records,
             )
 
         ensure_user_keys(db)
