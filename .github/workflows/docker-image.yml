@@ -51,6 +51,6 @@ jobs:
       run: sudo apt-get install -y lftp && sudo apt install -y rsync
 
     - name: connect and pull
-      run: sshpass -p "${{ secrets.SSH_PRIVATE_KEY }}" ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && (docker pull ghcr.io/sharky0420/dhbw_web:latest) && (docker stop dhbw_web || true) && (docker rm dhbw_web) || true && docker run -d --name dhbw_web --mount type=bind,src=/var/data,dst=/var/data -p 80:80 ghcr.io/sharky0420/dhbw_web && exit"
+      run: sshpass -p "${{ secrets.SSH_PRIVATE_KEY }}" ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "cd ${{ secrets.WORK_DIR }} && (docker pull ghcr.io/sharky0420/dhbw_web:latest) && (docker stop dhbw_web || true) && (docker rm dhbw_web) || true && docker run -d --name dhbw_web --mount type=bind,src=/var/data,dst=/var/data -p 80:80 ghrc.io/sharky0420/dhbw_web && exit"
     - name: cleanup
       run: rm -rf ~/.ssh
