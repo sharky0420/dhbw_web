@@ -271,7 +271,7 @@ class BlockchainLedger:
                 sender_public_key TEXT NOT NULL,
                 receiver_public_key TEXT NOT NULL,
                 signature TEXT NOT NULL,
-                amount REAL NOT NULL,
+                amount REAL NOT NULL
                 -- payload_hash TEXT NOT NULL,
                 -- previous_hash TEXT,
                 -- created_at TEXT NOT NULL
