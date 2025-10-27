@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
 import json
 import math
 import os
 import secrets
 import sqlite3
 from dataclasses import dataclass
+from typing import Sequence
 
 from flask import (
     Flask,
@@ -28,11 +31,20 @@ class User:
     name: str
     balance: float = 0.0
     cards: list[dict[str, str]] | None = None
+    public_key: str | None = None
+    private_key: str | None = None
+    initial_balance: float = 0.0
 
     @staticmethod
     def from_row(row: sqlite3.Row) -> "User":
         cards_raw = row["cards"] if "cards" in row.keys() else None
         cards = json.loads(cards_raw) if cards_raw else []
+        public_key = row["public_key"] if "public_key" in row.keys() else None
+        private_key = row["private_key"] if "private_key" in row.keys() else None
+        if "initial_balance" in row.keys() and row["initial_balance"] is not None:
+            initial_balance = row["initial_balance"]
+        else:
+            initial_balance = row["balance"]
         return User(
             id=row["id"],
             username=row["username"],
@@ -40,10 +52,426 @@ class User:
             name=row["name"],
             balance=row["balance"],
             cards=cards,
+            public_key=public_key,
+            private_key=private_key,
+            initial_balance=initial_balance,
         )
 
 
+@dataclass
+class LedgerEntry:
+    """Immutable representation of a blockchain transaction entry."""
+
+    id: str
+    sender_public_key: str
+    receiver_public_key: str
+    amount: float
+    signature: str
+    payload_hash: str
+    previous_hash: str | None
+    created_at: str
+
+
 DATABASE_PATH = os.environ.get("BANK_DB_PATH", os.path.join(os.path.dirname(__file__), "bank.db"))
+
+
+def _hash_private_key(private_key: str) -> str:
+    """Derive a deterministic public key from a private key using SHA-256."""
+
+    return hashlib.sha256(private_key.encode("utf-8")).hexdigest()
+
+
+def generate_key_pair() -> tuple[str, str]:
+    """Generate a new key pair suitable for signing demo transactions."""
+
+    private_key = secrets.token_hex(32)
+    public_key = _hash_private_key(private_key)
+    return public_key, private_key
+
+
+def get_peer_database_paths() -> list[str]:
+    """Return configured peer database paths.
+
+    Peers can be supplied either as a JSON array or a comma separated string.
+    """
+
+    raw_value = os.environ.get("BANK_PEER_DATABASES", "").strip()
+    if not raw_value:
+        return []
+
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        parsed = [segment.strip() for segment in raw_value.split(",") if segment.strip()]
+    else:
+        if isinstance(parsed, list):
+            parsed = [str(item) for item in parsed if str(item).strip()]
+        else:
+            parsed = []
+    return [path for path in parsed if path]
+
+
+class LedgerIntegrityError(RuntimeError):
+    """Raised when the blockchain ledger cannot guarantee integrity."""
+
+
+def ensure_user_schema(connection: sqlite3.Connection) -> None:
+    """Ensure that user-related cryptographic columns exist."""
+
+    connection.row_factory = sqlite3.Row
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "public_key" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN public_key TEXT")
+    if "private_key" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN private_key TEXT")
+    if "initial_balance" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN initial_balance REAL")
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_key ON users(public_key)"
+    )
+
+
+def ensure_user_keys(connection: sqlite3.Connection) -> None:
+    """Populate missing key pairs and baseline balances for all users."""
+
+    ensure_user_schema(connection)
+    cursor = connection.execute(
+        "SELECT id, balance, initial_balance, public_key, private_key FROM users"
+    )
+    for row in cursor.fetchall():
+        updates: list[str] = []
+        params: list[object] = []
+        public_key = row["public_key"]
+        private_key = row["private_key"]
+        if not public_key or not private_key:
+            public_key, private_key = generate_key_pair()
+            updates.extend(["public_key = ?", "private_key = ?"])
+            params.extend([public_key, private_key])
+        if row["initial_balance"] is None:
+            updates.append("initial_balance = ?")
+            params.append(row["balance"])
+        if updates:
+            params.append(row["id"])
+            connection.execute(
+                f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+
+
+class BlockchainLedger:
+    """Simple blockchain-inspired ledger to synchronize transactions across banks."""
+
+    def __init__(self, database_path: str, peer_paths: Sequence[str] | None = None) -> None:
+        self.database_path = database_path
+        self.peer_paths = [path for path in (peer_paths or []) if path and path != database_path]
+        self._initialize_local_state()
+
+    @staticmethod
+    def _connect(path: str) -> sqlite3.Connection:
+        connection = sqlite3.connect(path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _initialize_local_state(self) -> None:
+        with self._connect(self.database_path) as connection:
+            self._ensure_tables(connection)
+            ensure_user_keys(connection)
+
+    @staticmethod
+    def _ensure_tables(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS blockchain_transactions (
+                id TEXT PRIMARY KEY,
+                sender_public_key TEXT NOT NULL,
+                receiver_public_key TEXT NOT NULL,
+                amount REAL NOT NULL,
+                signature TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                previous_hash TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_blockchain_sender ON blockchain_transactions(sender_public_key)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_blockchain_receiver ON blockchain_transactions(receiver_public_key)"
+        )
+
+    @staticmethod
+    def _build_message(sender_public_key: str, receiver_public_key: str, amount: float) -> str:
+        return f"{sender_public_key}:{receiver_public_key}:{amount:.2f}"
+
+    @staticmethod
+    def _sign_message(private_key: str, message: str) -> str:
+        key_bytes = bytes.fromhex(private_key)
+        digest = hmac.new(key_bytes, message.encode("utf-8"), hashlib.sha256)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _calculate_payload_hash(
+        entry_id: str,
+        previous_hash: str | None,
+        sender_public_key: str,
+        receiver_public_key: str,
+        amount: float,
+        signature: str,
+        created_at: str,
+    ) -> str:
+        payload = "|".join(
+            [
+                entry_id,
+                previous_hash or "",
+                sender_public_key,
+                receiver_public_key,
+                f"{amount:.2f}",
+                signature,
+                created_at,
+            ]
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _row_to_entry(row: sqlite3.Row) -> LedgerEntry:
+        return LedgerEntry(
+            id=row["id"],
+            sender_public_key=row["sender_public_key"],
+            receiver_public_key=row["receiver_public_key"],
+            amount=row["amount"],
+            signature=row["signature"],
+            payload_hash=row["payload_hash"],
+            previous_hash=row["previous_hash"],
+            created_at=row["created_at"],
+        )
+
+    def _get_last_payload_hash_from_connection(
+        self, connection: sqlite3.Connection
+    ) -> str | None:
+        row = connection.execute(
+            "SELECT payload_hash FROM blockchain_transactions ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        return row["payload_hash"] if row else None
+
+    def _get_last_payload_hash(self, path: str) -> str | None:
+        with self._connect(path) as connection:
+            return self._get_last_payload_hash_from_connection(connection)
+
+    def _verify_signature(
+        self, connection: sqlite3.Connection, entry: LedgerEntry
+    ) -> bool:
+        ensure_user_keys(connection)
+        row = connection.execute(
+            "SELECT private_key FROM users WHERE public_key = ?",
+            (entry.sender_public_key,),
+        ).fetchone()
+        if not row or not row["private_key"]:
+            return False
+        expected = self._sign_message(
+            row["private_key"],
+            self._build_message(entry.sender_public_key, entry.receiver_public_key, entry.amount),
+        )
+        return hmac.compare_digest(expected, entry.signature)
+
+    def create_entry(self, sender: User, recipient: User, amount: float) -> LedgerEntry:
+        if not sender.public_key or not sender.private_key:
+            raise LedgerIntegrityError("Sender has no cryptographic identity configured.")
+        if not recipient.public_key:
+            raise LedgerIntegrityError("Recipient has no cryptographic identity configured.")
+
+        previous_hash = self._get_last_payload_hash(self.database_path)
+        created_at = dt.datetime.utcnow().isoformat()
+        entry_id = secrets.token_hex(16)
+        message = self._build_message(sender.public_key, recipient.public_key, amount)
+        signature = self._sign_message(sender.private_key, message)
+        payload_hash = self._calculate_payload_hash(
+            entry_id,
+            previous_hash,
+            sender.public_key,
+            recipient.public_key,
+            amount,
+            signature,
+            created_at,
+        )
+        return LedgerEntry(
+            id=entry_id,
+            sender_public_key=sender.public_key,
+            receiver_public_key=recipient.public_key,
+            amount=round(amount, 2),
+            signature=signature,
+            payload_hash=payload_hash,
+            previous_hash=previous_hash,
+            created_at=created_at,
+        )
+
+    def persist_entry(
+        self,
+        connection: sqlite3.Connection,
+        entry: LedgerEntry,
+        *,
+        enforce_balance: bool = True,
+        enforce_chain: bool = True,
+        verify_signature: bool = True,
+    ) -> tuple[float, float] | None:
+        """Store a ledger entry and adjust account balances."""
+
+        self._ensure_tables(connection)
+        ensure_user_keys(connection)
+
+        sender_row = connection.execute(
+            "SELECT id, balance FROM users WHERE public_key = ?",
+            (entry.sender_public_key,),
+        ).fetchone()
+        recipient_row = connection.execute(
+            "SELECT id, balance FROM users WHERE public_key = ?",
+            (entry.receiver_public_key,),
+        ).fetchone()
+
+        if not sender_row or not recipient_row:
+            raise LedgerIntegrityError("Sender or recipient is unknown to this ledger.")
+
+        sender_balance = float(sender_row["balance"])
+        recipient_balance = float(recipient_row["balance"])
+
+        if enforce_balance and sender_balance + 1e-9 < entry.amount:
+            raise LedgerIntegrityError("Insufficient funds for ledger entry.")
+
+        if verify_signature and not self._verify_signature(connection, entry):
+            raise LedgerIntegrityError("Invalid transaction signature detected.")
+
+        if enforce_chain:
+            last_hash = self._get_last_payload_hash_from_connection(connection)
+            if last_hash != entry.previous_hash:
+                raise LedgerIntegrityError("Ledger chain continuity check failed.")
+
+        try:
+            connection.execute(
+                """
+                INSERT INTO blockchain_transactions (
+                    id, sender_public_key, receiver_public_key, amount, signature,
+                    payload_hash, previous_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.id,
+                    entry.sender_public_key,
+                    entry.receiver_public_key,
+                    entry.amount,
+                    entry.signature,
+                    entry.payload_hash,
+                    entry.previous_hash,
+                    entry.created_at,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            return None
+
+        new_sender_balance = round(sender_balance - entry.amount, 2)
+        new_recipient_balance = round(recipient_balance + entry.amount, 2)
+
+        connection.execute(
+            "UPDATE users SET balance = ? WHERE id = ?",
+            (new_sender_balance, sender_row["id"]),
+        )
+        connection.execute(
+            "UPDATE users SET balance = ? WHERE id = ?",
+            (new_recipient_balance, recipient_row["id"]),
+        )
+        return new_sender_balance, new_recipient_balance
+
+    def recalculate_balances(self, connection: sqlite3.Connection) -> None:
+        """Rebuild balances from the initial baseline and the blockchain."""
+
+        ensure_user_keys(connection)
+        users = connection.execute(
+            "SELECT public_key, initial_balance FROM users"
+        ).fetchall()
+        balances = {
+            row["public_key"]: float(row["initial_balance"] or 0.0) for row in users if row["public_key"]
+        }
+        entries = connection.execute(
+            "SELECT sender_public_key, receiver_public_key, amount FROM blockchain_transactions ORDER BY created_at"
+        ).fetchall()
+        for row in entries:
+            sender_key = row["sender_public_key"]
+            receiver_key = row["receiver_public_key"]
+            amount = float(row["amount"])
+            if sender_key in balances:
+                balances[sender_key] = round(balances[sender_key] - amount, 2)
+            if receiver_key in balances:
+                balances[receiver_key] = round(balances[receiver_key] + amount, 2)
+        for public_key, balance in balances.items():
+            connection.execute(
+                "UPDATE users SET balance = ? WHERE public_key = ?",
+                (balance, public_key),
+            )
+
+    def propagate_entry(self, entry: LedgerEntry) -> None:
+        """Replicate an entry to all known peer databases."""
+
+        for peer_path in self.peer_paths:
+            try:
+                self._apply_to_peer(peer_path, entry)
+            except sqlite3.Error:
+                continue
+            except LedgerIntegrityError:
+                try:
+                    self._heal_peer(peer_path)
+                    self._apply_to_peer(peer_path, entry)
+                except Exception:
+                    continue
+
+    def _apply_to_peer(self, peer_path: str, entry: LedgerEntry) -> None:
+        with self._connect(peer_path) as connection:
+            self._ensure_tables(connection)
+            ensure_user_keys(connection)
+            last_hash = self._get_last_payload_hash_from_connection(connection)
+            if last_hash:
+                if last_hash != entry.previous_hash:
+                    raise LedgerIntegrityError("Peer ledger out of sync.")
+                enforce_chain = True
+            else:
+                if entry.previous_hash:
+                    raise LedgerIntegrityError("Peer ledger missing historical blocks.")
+                enforce_chain = False
+            self.persist_entry(
+                connection,
+                entry,
+                enforce_balance=False,
+                enforce_chain=enforce_chain,
+                verify_signature=True,
+            )
+
+    def _heal_peer(self, peer_path: str) -> None:
+        with self._connect(peer_path) as peer_connection, self._connect(
+            self.database_path
+        ) as local_connection:
+            self._ensure_tables(peer_connection)
+            ensure_user_keys(peer_connection)
+            peer_connection.execute(
+                "UPDATE users SET balance = COALESCE(initial_balance, balance)"
+            )
+            peer_connection.execute("DELETE FROM blockchain_transactions")
+            entries = local_connection.execute(
+                "SELECT * FROM blockchain_transactions ORDER BY created_at"
+            ).fetchall()
+            for row in entries:
+                entry = self._row_to_entry(row)
+                try:
+                    self.persist_entry(
+                        peer_connection,
+                        entry,
+                        enforce_balance=False,
+                        enforce_chain=False,
+                        verify_signature=True,
+                    )
+                except sqlite3.IntegrityError:
+                    continue
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("BANK_SECRET_KEY", "retro-bank-secret-key")
@@ -65,7 +493,10 @@ def init_db() -> None:
                 password TEXT NOT NULL,
                 name TEXT NOT NULL,
                 balance REAL NOT NULL DEFAULT 0.0,
-                cards TEXT
+                cards TEXT,
+                public_key TEXT,
+                private_key TEXT,
+                initial_balance REAL
             );
 
             CREATE TABLE IF NOT EXISTS feedback (
@@ -123,8 +554,14 @@ def init_db() -> None:
                 ],
             )
 
+        ensure_user_keys(db)
+        BlockchainLedger._ensure_tables(db)
+
 
 init_db()
+
+
+LEDGER = BlockchainLedger(DATABASE_PATH, get_peer_database_paths())
 
 
 # Wechselkurse (Basisdaten, dynamisch angepasst)
@@ -171,6 +608,22 @@ def load_user(user_id: int) -> User | None:
     with get_db() as db:
         cursor = db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
+        if not row:
+            return None
+        return User.from_row(row)
+
+
+def load_user_by_username(username: str) -> User | None:
+    with get_db() as db:
+        row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        if not row:
+            return None
+        return User.from_row(row)
+
+
+def load_user_by_public_key(public_key: str) -> User | None:
+    with get_db() as db:
+        row = db.execute("SELECT * FROM users WHERE public_key = ?", (public_key,)).fetchone()
         if not row:
             return None
         return User.from_row(row)
@@ -322,39 +775,47 @@ def account():
             "SELECT id, username, name FROM users WHERE id != ? ORDER BY name",
             (user.id,),
         ).fetchall()
-        transaction_rows = db.execute(
+        blockchain_rows = db.execute(
             """
-            SELECT
-                t.id,
-                t.sender_id,
-                t.recipient_id,
-                t.amount,
-                t.created_at,
-                sender.name AS sender_name,
-                recipient.name AS recipient_name,
-                sender.username AS sender_username,
-                recipient.username AS recipient_username
-            FROM transactions AS t
-            LEFT JOIN users AS sender ON sender.id = t.sender_id
-            LEFT JOIN users AS recipient ON recipient.id = t.recipient_id
-            WHERE t.sender_id = ? OR t.recipient_id = ?
-            ORDER BY t.created_at DESC
+            SELECT id, sender_public_key, receiver_public_key, amount, created_at
+            FROM blockchain_transactions
+            WHERE sender_public_key = ? OR receiver_public_key = ?
+            ORDER BY created_at DESC
             LIMIT 10
             """,
-            (user.id, user.id),
+            (user.public_key, user.public_key),
         ).fetchall()
+
+        counterparty_keys: set[str] = set()
+        for row in blockchain_rows:
+            if row["sender_public_key"] == user.public_key:
+                counterparty_keys.add(row["receiver_public_key"])
+            else:
+                counterparty_keys.add(row["sender_public_key"])
+
+        counterparties: dict[str, sqlite3.Row] = {}
+        if counterparty_keys:
+            ordered_keys = sorted(counterparty_keys)
+            placeholders = ",".join("?" for _ in ordered_keys)
+            rows = db.execute(
+                f"SELECT public_key, name, username FROM users WHERE public_key IN ({placeholders})",
+                tuple(ordered_keys),
+            ).fetchall()
+            counterparties = {row["public_key"]: row for row in rows}
 
     other_accounts = [dict(row) for row in account_rows]
     transactions = []
-    for row in transaction_rows:
-        direction = "outgoing" if row["sender_id"] == user.id else "incoming"
-        counterparty_name = (
-            row["recipient_name"] if direction == "outgoing" else row["sender_name"]
-        )
+    for row in blockchain_rows:
+        if row["sender_public_key"] == user.public_key:
+            direction = "outgoing"
+            counterparty_key = row["receiver_public_key"]
+        else:
+            direction = "incoming"
+            counterparty_key = row["sender_public_key"]
+        counterparty_row = counterparties.get(counterparty_key)
+        counterparty_name = counterparty_row["name"] if counterparty_row else "Unbekannt"
         counterparty_username = (
-            row["recipient_username"]
-            if direction == "outgoing"
-            else row["sender_username"]
+            counterparty_row["username"] if counterparty_row else counterparty_key[:8]
         )
         transactions.append(
             {
@@ -454,60 +915,51 @@ def api_transfer():
     if not recipient_username:
         return jsonify({"error": "Bitte wählen Sie ein Zielkonto."}), 400
 
-    user_id = session["user_id"]
+    sender = load_user(session["user_id"])
+    if not sender:
+        return jsonify({"error": "Absenderkonto wurde nicht gefunden."}), 404
 
-    with get_db() as db:
-        sender_row = db.execute(
-            "SELECT id, balance FROM users WHERE id = ?",
-            (user_id,),
-        ).fetchone()
-        if not sender_row:
-            return jsonify({"error": "Absenderkonto wurde nicht gefunden."}), 404
+    recipient = load_user_by_username(recipient_username)
+    if not recipient:
+        return jsonify({"error": "Zielkonto wurde nicht gefunden."}), 404
 
-        recipient_row = db.execute(
-            "SELECT id, balance, name, username FROM users WHERE username = ?",
-            (recipient_username,),
-        ).fetchone()
+    if recipient.id == sender.id:
+        return jsonify({"error": "Überweisungen an das eigene Konto sind nicht erlaubt."}), 400
 
-        if not recipient_row:
-            return jsonify({"error": "Zielkonto wurde nicht gefunden."}), 404
+    if sender.balance < amount:
+        return jsonify({"error": "Unzureichendes Guthaben."}), 400
 
-        if recipient_row["id"] == user_id:
-            return jsonify({"error": "Überweisungen an das eigene Konto sind nicht erlaubt."}), 400
+    try:
+        entry = LEDGER.create_entry(sender, recipient, amount)
+    except LedgerIntegrityError as error:
+        return jsonify({"error": str(error)}), 400
 
-        sender_balance = float(sender_row["balance"])
-        if sender_balance < amount:
-            return jsonify({"error": "Unzureichendes Guthaben."}), 400
+    try:
+        with get_db() as db:
+            result = LEDGER.persist_entry(db, entry)
+            if result is None:
+                LEDGER.recalculate_balances(db)
+                result = (sender.balance - amount, recipient.balance + amount)
+    except LedgerIntegrityError as error:
+        return jsonify({"error": str(error)}), 400
 
-        recipient_balance = float(recipient_row["balance"])
+    LEDGER.propagate_entry(entry)
 
-        new_sender_balance = round(sender_balance - amount, 2)
-        new_recipient_balance = round(recipient_balance + amount, 2)
-        timestamp = dt.datetime.utcnow().isoformat()
-
-        db.execute(
-            "UPDATE users SET balance = ? WHERE id = ?",
-            (new_sender_balance, user_id),
-        )
-        db.execute(
-            "UPDATE users SET balance = ? WHERE id = ?",
-            (new_recipient_balance, recipient_row["id"]),
-        )
-        db.execute(
-            "INSERT INTO transactions (sender_id, recipient_id, amount, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, recipient_row["id"], amount, timestamp),
-        )
+    new_sender_balance = result[0]
+    timestamp = entry.created_at
 
     return jsonify(
         {
             "status": "ok",
             "balance": new_sender_balance,
             "recipient": {
-                "name": recipient_row["name"],
-                "username": recipient_row["username"],
+                "name": recipient.name,
+                "username": recipient.username,
             },
-            "amount": amount,
+            "amount": entry.amount,
             "timestamp": timestamp,
+            "transaction_id": entry.id,
+            "signature": entry.signature,
         }
     )
 
@@ -520,38 +972,53 @@ def api_transactions():
     user_id = session["user_id"]
 
     with get_db() as db:
-        rows = db.execute(
+        user_row = db.execute(
+            "SELECT public_key FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if not user_row:
+            return jsonify({"error": "User not found"}), 404
+        public_key = user_row["public_key"]
+        ledger_rows = db.execute(
             """
-            SELECT
-                t.id,
-                t.sender_id,
-                t.recipient_id,
-                t.amount,
-                t.created_at,
-                sender.name AS sender_name,
-                recipient.name AS recipient_name,
-                sender.username AS sender_username,
-                recipient.username AS recipient_username
-            FROM transactions AS t
-            LEFT JOIN users AS sender ON sender.id = t.sender_id
-            LEFT JOIN users AS recipient ON recipient.id = t.recipient_id
-            WHERE t.sender_id = ? OR t.recipient_id = ?
-            ORDER BY t.created_at DESC
+            SELECT id, sender_public_key, receiver_public_key, amount, created_at
+            FROM blockchain_transactions
+            WHERE sender_public_key = ? OR receiver_public_key = ?
+            ORDER BY created_at DESC
             LIMIT 20
             """,
-            (user_id, user_id),
+            (public_key, public_key),
         ).fetchall()
 
+        counterparty_keys: set[str] = set()
+        for row in ledger_rows:
+            if row["sender_public_key"] == public_key:
+                counterparty_keys.add(row["receiver_public_key"])
+            else:
+                counterparty_keys.add(row["sender_public_key"])
+
+        counterparts: dict[str, sqlite3.Row] = {}
+        if counterparty_keys:
+            ordered_keys = sorted(counterparty_keys)
+            placeholders = ",".join("?" for _ in ordered_keys)
+            rows = db.execute(
+                f"SELECT public_key, name, username FROM users WHERE public_key IN ({placeholders})",
+                tuple(ordered_keys),
+            ).fetchall()
+            counterparts = {row["public_key"]: row for row in rows}
+
     transactions: list[dict[str, object]] = []
-    for row in rows:
-        direction = "outgoing" if row["sender_id"] == user_id else "incoming"
-        counterparty_name = (
-            row["recipient_name"] if direction == "outgoing" else row["sender_name"]
-        )
+    for row in ledger_rows:
+        if row["sender_public_key"] == public_key:
+            direction = "outgoing"
+            counterparty_key = row["receiver_public_key"]
+        else:
+            direction = "incoming"
+            counterparty_key = row["sender_public_key"]
+        counterparty_row = counterparts.get(counterparty_key)
+        counterparty_name = counterparty_row["name"] if counterparty_row else "Unbekannt"
         counterparty_username = (
-            row["recipient_username"]
-            if direction == "outgoing"
-            else row["sender_username"]
+            counterparty_row["username"] if counterparty_row else counterparty_key[:8]
         )
         transactions.append(
             {
