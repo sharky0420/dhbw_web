@@ -134,6 +134,87 @@ def ensure_user_schema(connection: sqlite3.Connection) -> None:
     )
 
 
+def ensure_transactions_schema(connection: sqlite3.Connection) -> None:
+    """Ensure transaction records reference public keys instead of internal IDs."""
+
+    connection.row_factory = sqlite3.Row
+    columns = connection.execute("PRAGMA table_info(transactions)").fetchall()
+    if not columns:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_public_key TEXT NOT NULL,
+                recipient_public_key TEXT NOT NULL,
+                amount REAL NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+    else:
+        column_names = {row["name"] for row in columns}
+        if {"sender_public_key", "recipient_public_key"}.issubset(column_names):
+            pass
+        elif {"sender_id", "recipient_id"}.issubset(column_names):
+            # Promote legacy ID-based records to public-key based entries.
+            connection.execute("ALTER TABLE transactions RENAME TO transactions_legacy")
+            connection.execute(
+                """
+                CREATE TABLE transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_public_key TEXT NOT NULL,
+                    recipient_public_key TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO transactions (
+                    id,
+                    sender_public_key,
+                    recipient_public_key,
+                    amount,
+                    created_at
+                )
+                SELECT
+                    legacy.id,
+                    sender.public_key,
+                    recipient.public_key,
+                    legacy.amount,
+                    legacy.created_at
+                FROM transactions_legacy AS legacy
+                LEFT JOIN users AS sender ON sender.id = legacy.sender_id
+                LEFT JOIN users AS recipient ON recipient.id = legacy.recipient_id
+                WHERE sender.public_key IS NOT NULL
+                  AND recipient.public_key IS NOT NULL
+                """
+            )
+            connection.execute("DROP TABLE transactions_legacy")
+        else:
+            # Unknown layout: recreate the table to guarantee interoperability.
+            connection.execute("DROP TABLE transactions")
+            connection.execute(
+                """
+                CREATE TABLE transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_public_key TEXT NOT NULL,
+                    recipient_public_key TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_sender_public_key ON transactions(sender_public_key)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transactions_recipient_public_key ON transactions(recipient_public_key)"
+    )
+
+
 def ensure_user_keys(connection: sqlite3.Connection) -> None:
     """Populate missing key pairs and baseline balances for all users."""
 
@@ -179,6 +260,7 @@ class BlockchainLedger:
         with self._connect(self.database_path) as connection:
             self._ensure_tables(connection)
             ensure_user_keys(connection)
+            ensure_transactions_schema(connection)
 
     @staticmethod
     def _ensure_tables(connection: sqlite3.Connection) -> None:
@@ -428,6 +510,7 @@ class BlockchainLedger:
         with self._connect(peer_path) as connection:
             self._ensure_tables(connection)
             ensure_user_keys(connection)
+            ensure_transactions_schema(connection)
             last_hash = self._get_last_payload_hash_from_connection(connection)
             if last_hash:
                 if last_hash != entry.previous_hash:
@@ -451,6 +534,7 @@ class BlockchainLedger:
         ) as local_connection:
             self._ensure_tables(peer_connection)
             ensure_user_keys(peer_connection)
+            ensure_transactions_schema(peer_connection)
             peer_connection.execute(
                 "UPDATE users SET balance = COALESCE(initial_balance, balance)"
             )
@@ -492,7 +576,10 @@ def init_db() -> None:
                 password TEXT NOT NULL,
                 name TEXT NOT NULL,
                 balance REAL NOT NULL DEFAULT 0.0,
-                cards TEXT
+                cards TEXT,
+                public_key TEXT UNIQUE,
+                private_key TEXT,
+                initial_balance REAL
             );
 
             CREATE TABLE IF NOT EXISTS feedback (
@@ -523,12 +610,10 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sender_id INTEGER NOT NULL,
-                recipient_id INTEGER NOT NULL,
+                sender_public_key TEXT NOT NULL,
+                recipient_public_key TEXT NOT NULL,
                 amount REAL NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (sender_id) REFERENCES users(id),
-                FOREIGN KEY (recipient_id) REFERENCES users(id)
+                created_at TEXT NOT NULL
             );
             """
         )
@@ -541,16 +626,44 @@ def init_db() -> None:
                     {"type": "Kredit", "masked": "**** **** **** 9876", "status": "Aktiv"},
                 ]
             )
+            seed_users = [
+                ("test", "test", "Nutzer 1", 1337.42, demo_cards),
+                ("user", "user", "Hallo Welt", 2.12, demo_cards),
+                ("root", "root", "MEnsch 1", 1.42, demo_cards),
+            ]
+            user_records: list[tuple[object, ...]] = []
+            for username, password, name, balance, cards in seed_users:
+                public_key, private_key = generate_key_pair()
+                user_records.append(
+                    (
+                        username,
+                        password,
+                        name,
+                        balance,
+                        cards,
+                        balance,  # initial_balance mirrors the starting balance
+                        public_key,
+                        private_key,
+                    )
+                )
             db.executemany(
-                "INSERT INTO users (username, password, name, balance, cards) VALUES (?, ?, ?, ?, ?)",
-                [
-                    ("test", "test", "Nutzer 1", 1337.42, demo_cards),
-                    ("user", "user", "Hallo Welt", 2.12, demo_cards),
-                    ("root", "root", "MEnsch 1", 1.42, demo_cards),
-                ],
+                """
+                INSERT INTO users (
+                    username,
+                    password,
+                    name,
+                    balance,
+                    cards,
+                    initial_balance,
+                    public_key,
+                    private_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                user_records,
             )
 
         ensure_user_keys(db)
+        ensure_transactions_schema(db)
         BlockchainLedger._ensure_tables(db)
 
 
