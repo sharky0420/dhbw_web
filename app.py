@@ -65,11 +65,11 @@ class LedgerEntry:
     id: str
     sender_public_key: str
     receiver_public_key: str
-    amount: float
     signature: str
-    payload_hash: str
-    previous_hash: str | None
-    created_at: str
+    amount: float
+    payload_hash: str = None
+    previous_hash: str = None
+    created_at: str = None
 
 
 DATABASE_PATH = os.environ.get("BANK_DB_PATH", os.path.join(os.path.dirname(__file__), "bank.db"))
@@ -188,11 +188,11 @@ class BlockchainLedger:
                 id TEXT PRIMARY KEY,
                 sender_public_key TEXT NOT NULL,
                 receiver_public_key TEXT NOT NULL,
-                amount REAL NOT NULL,
                 signature TEXT NOT NULL,
-                payload_hash TEXT NOT NULL,
-                previous_hash TEXT,
-                created_at TEXT NOT NULL
+                amount REAL NOT NULL,
+                -- payload_hash TEXT NOT NULL,
+                -- previous_hash TEXT,
+                -- created_at TEXT NOT NULL
             )
             """
         )
@@ -242,11 +242,11 @@ class BlockchainLedger:
             id=row["id"],
             sender_public_key=row["sender_public_key"],
             receiver_public_key=row["receiver_public_key"],
-            amount=row["amount"],
             signature=row["signature"],
-            payload_hash=row["payload_hash"],
-            previous_hash=row["previous_hash"],
-            created_at=row["created_at"],
+            amount=row["amount"],
+            # payload_hash=row["payload_hash"],
+            # previous_hash=row["previous_hash"],
+            # created_at=row["created_at"],
         )
 
     def _get_last_payload_hash_from_connection(
@@ -286,8 +286,7 @@ class BlockchainLedger:
         previous_hash = self._get_last_payload_hash(self.database_path)
         created_at = dt.datetime.utcnow().isoformat()
         entry_id = secrets.token_hex(16)
-        message = self._build_message(sender.public_key, recipient.public_key, amount)
-        signature = self._sign_message(sender.private_key, message)
+        signature = f"{sender.public_key};{recipient.public_key};{amount:.2f}"
         payload_hash = self._calculate_payload_hash(
             entry_id,
             previous_hash,
@@ -301,11 +300,11 @@ class BlockchainLedger:
             id=entry_id,
             sender_public_key=sender.public_key,
             receiver_public_key=recipient.public_key,
-            amount=round(amount, 2),
             signature=signature,
-            payload_hash=payload_hash,
-            previous_hash=previous_hash,
-            created_at=created_at,
+            amount=round(amount, 2),
+            # payload_hash=payload_hash,
+            # previous_hash=previous_hash,
+            # created_at=created_at,
         )
 
     def persist_entry(
@@ -352,19 +351,19 @@ class BlockchainLedger:
             connection.execute(
                 """
                 INSERT INTO blockchain_transactions (
-                    id, sender_public_key, receiver_public_key, amount, signature,
-                    payload_hash, previous_hash, created_at
+                    id, sender_public_key, receiver_public_key,  signature, amount,
+                    -- payload_hash, previous_hash, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry.id,
                     entry.sender_public_key,
                     entry.receiver_public_key,
-                    entry.amount,
                     entry.signature,
-                    entry.payload_hash,
-                    entry.previous_hash,
-                    entry.created_at,
+                    entry.amount,
+                    # entry.payload_hash,
+                    # entry.previous_hash,
+                    # entry.created_at,
                 ),
             )
         except sqlite3.IntegrityError:
