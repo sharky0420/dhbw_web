@@ -351,6 +351,12 @@ def api_transfer():
             (new_sender_balance, sender.id)
         )
 
+        if receiver:
+            db.execute(
+                "UPDATE users SET balance = ? WHERE id = ?",
+                (receiver.balance + amount, receiver.id)
+            )
+
     timestamp = dt.datetime.now()
     database_util.add_transaction(sender.public_key, recipient_public_key, amount, timestamp)
 
