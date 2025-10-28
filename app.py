@@ -28,44 +28,7 @@ from flask import (
     url_for,
 )
 
-
-@dataclass
-class User:
-    id: int
-    username: str
-    password: str
-    name: str
-    balance: float = 0.0
-    cards: list[dict[str, str]] | None = None
-    public_key: str | None = None
-    private_key: str | None = None
-    initial_balance: float = 0.0
-
-    @staticmethod
-    def from_row(row: sqlite3.Row) -> "User":
-        cards_raw = row["cards"] if "cards" in row.keys() else None
-        cards = json.loads(cards_raw) if cards_raw else []
-        public_key = row["public_key"] if "public_key" in row.keys() else None
-        private_key = row["private_key"] if "private_key" in row.keys() else None
-        if "initial_balance" in row.keys() and row["initial_balance"] is not None:
-            initial_balance = row["initial_balance"]
-        else:
-            initial_balance = row["balance"]
-        return User(
-            id=row["id"],
-            username=row["username"],
-            password=row["password"],
-            name=row["name"],
-            balance=row["balance"],
-            cards=cards,
-            public_key=public_key,
-            private_key=private_key,
-            initial_balance=initial_balance,
-        )
-
-
-DATABASE_PATH = os.environ.get("BANK_DB_PATH", os.path.join(os.path.dirname(__file__), "bank.db"))
-OTHER_BANK_IPS: list[str] = []
+OTHER_BANK_IPS: list[str] = ["91.98.115.224"]
 
 
 
