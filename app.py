@@ -493,20 +493,20 @@ def synchronize_with_other_clients(sender_public_key, receiver_public_key, amoun
         full_url: str = f"http://{bank_ip}{url_path}"
 
         req = Request(full_url, b"", method="POST")
-        app.logger.debug("#" * 10)
-        app.logger.debug("New Ledger:")
+        app.logger.info("#" * 10)
+        app.logger.info("New Ledger:")
         try:
             resp:  HTTPResponse = urllib.request.urlopen(req)
             status_code: int = resp.status
 
             if status_code == 200:
-                app.logger.debug(f"VALID RESPONSE to {bank_ip}")
+                app.logger.info(f"VALID RESPONSE to {bank_ip}")
             else:
-                app.logger.debug(f"INVALID RESPONSE to {bank_ip}, {status_code}, {resp.read()}")
+                app.logger.info(f"INVALID RESPONSE to {bank_ip}, {status_code}, {resp.read()}")
             resp.close()
 
         except Exception as e:
-            app.logger.debug(f"COULD NOT COMMIT TO {bank_ip}", e)
+            app.logger.info(f"COULD NOT COMMIT TO {bank_ip}", e)
 
 
 
