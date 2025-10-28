@@ -156,12 +156,7 @@
               <div id="transfer-alert" class="alert d-none" role="alert"></div>
               <div class="mb-3">
                 <label for="transfer-recipient" class="form-label">Zielkonto</label>
-                <select id="transfer-recipient" class="form-select">
-                  <option value="">Bitte wählen</option>
-                  {% for account in other_accounts %}
-                  <option value="{{ account.username }}">{{ account.name }} ({{ account.username }})</option>
-                  {% endfor %}
-                </select>
+                <input id="transfer-recipient">
               </div>
               <div class="mb-3">
                 <label for="transfer-amount" class="form-label">Betrag (USD)</label>
@@ -174,14 +169,9 @@
                   placeholder="0,00"
                 />
               </div>
-              <button class="btn btn-success w-100" id="transfer-submit" {% if other_accounts|length == 0 %}disabled{% endif %}>
+              <button class="btn btn-success w-100" id="transfer-submit">
                 Überweisung senden
               </button>
-              {% if other_accounts|length == 0 %}
-              <p class="small text-muted mt-2 mb-0">
-                Aktuell sind keine weiteren Konten verfügbar.
-              </p>
-              {% endif %}
             </div>
           </div>
         </div>
@@ -204,8 +194,8 @@
                       {% if tx.direction == 'outgoing' %}Ausgehend{% else %}Eingehend{% endif %}
                     </span>
                     <div class="fw-semibold">{{ tx.counterparty_name }}</div>
-                    <div class="small text-muted">{{ tx.counterparty_username }}</div>
-                    <div class="small text-muted">{{ tx.created_at }}</div>
+                    <div class="small text-muted">{{ tx.counterparty_public_key }}</div>
+                    {% if tx.created_at %}<div class="small text-muted">{{ tx.created_at }}</div>{% endif %}
                   </div>
                   <div class="text-end fw-semibold transaction-amount {% if tx.direction == 'outgoing' %}text-danger{% else %}text-success{% endif %}">
                     {% if tx.direction == 'outgoing' %}-{% else %}+{% endif %}{{ "%.2f" | format(tx.amount) }}&nbsp;USD
