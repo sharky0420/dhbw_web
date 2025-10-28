@@ -8,6 +8,8 @@ WORKDIR /usr/local/app
 COPY templates ./templates
 COPY app.py ./app.py
 COPY wsgi.py ./wsgi.py
+COPY database_util.py ./database_util.py
+COPY utility.py ./utility.py
 
 RUN pip install wheel
 RUN pip install flask

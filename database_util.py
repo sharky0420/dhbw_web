@@ -2,7 +2,7 @@ import json
 import os
 import sqlite3
 
-import util
+import utility
 
 DATABASE_PATH = os.environ.get("BANK_DB_PATH", os.path.join(os.path.dirname(__file__), "bank.db"))
 
@@ -85,7 +85,7 @@ def insert_users_if_not_exist() -> None:
             )
 
 
-def match_user(username: str, password: str) -> util.User | None:
+def match_user(username: str, password: str) -> utility.User | None:
     with get_db() as db:
         cursor = db.execute(
             "SELECT * FROM users WHERE username = ? AND password = ?",
@@ -94,35 +94,35 @@ def match_user(username: str, password: str) -> util.User | None:
         row = cursor.fetchone()
         if not row:
             return None
-        return util.User.from_row(row)
+        return utility.User.from_row(row)
 
 
-def load_user(user_id: int) -> util.User | None:
+def load_user(user_id: int) -> utility.User | None:
     with get_db() as db:
         cursor = db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = cursor.fetchone()
         if not row:
             return None
-        return util.User.from_row(row)
+        return utility.User.from_row(row)
 
 
-def load_user_by_username(username: str) -> util.User | None:
+def load_user_by_username(username: str) -> utility.User | None:
     with get_db() as db:
         row = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         if not row:
             return None
-        return util.User.from_row(row)
+        return utility.User.from_row(row)
 
 
-def load_user_by_public_key(public_key: str) -> util.User | None:
+def load_user_by_public_key(public_key: str) -> utility.User | None:
     with get_db() as db:
         row = db.execute("SELECT * FROM users WHERE public_key = ?", (public_key,)).fetchone()
         if not row:
             return None
-        return util.User.from_row(row)
+        return utility.User.from_row(row)
 
 
-def get_user_feedback_count(user: util.User) -> int:
+def get_user_feedback_count(user: utility.User) -> int:
     with get_db() as db:
         feedback_count = (
             db.execute("SELECT COUNT(*) FROM feedback WHERE user_id = ?", (user.id,))
@@ -131,7 +131,7 @@ def get_user_feedback_count(user: util.User) -> int:
         return feedback_count
 
 
-def get_user_appointment_count(user: util.User) -> int:
+def get_user_appointment_count(user: utility.User) -> int:
     with get_db() as db:
         feedback_count = (
             db.execute("SELECT COUNT(*) FROM appointments WHERE user_id = ?", (user.id,))
@@ -140,7 +140,7 @@ def get_user_appointment_count(user: util.User) -> int:
         return feedback_count
 
 
-def get_user_transactions(user: util.User) -> list[util.Transaction]:
+def get_user_transactions(user: utility.User) -> list[utility.Transaction]:
     with get_db() as db:
         transaction_rows = db.execute(
             """
@@ -153,14 +153,14 @@ def get_user_transactions(user: util.User) -> list[util.Transaction]:
             (user.public_key, user.public_key),
         ).fetchall()
 
-        transactions: list[util.Transaction] = []
+        transactions: list[utility.Transaction] = []
 
         for row in transaction_rows:
-            transactions.append(util.Transaction.from_row(row))
+            transactions.append(utility.Transaction.from_row(row))
         return transactions
 
 
-def get_other_basic_user_data(user: util.User) -> list[dict[str, str]]:
+def get_other_basic_user_data(user: utility.User) -> list[dict[str, str]]:
     with get_db() as db:
         account_rows = db.execute(
             "SELECT id, username, name, public_key FROM users WHERE id != ? ORDER BY name",

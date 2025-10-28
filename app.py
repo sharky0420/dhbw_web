@@ -14,7 +14,7 @@ from urllib.request import Request
 import urllib.request
 from http.client import HTTPResponse
 
-import util
+import utility
 import database_util
 
 from flask import (
@@ -122,9 +122,9 @@ def index():
 def dashboard():
     with database_util.get_db() as db:
         cursor = db.execute("SELECT * FROM users ")
-        users : list[util.User] = []
+        users : list[utility.User] = []
         for row in cursor.fetchall():
-            users.append(util.User.from_row(row))
+            users.append(utility.User.from_row(row))
 
         feedback_cursor = db.execute("SELECT * FROM feedback")
         feedbacks = feedback_cursor.fetchall()
@@ -195,7 +195,7 @@ def account():
         session.clear()
         return redirect(url_for("login"))
 
-    rates = util.get_exchange_rates()
+    rates = utility.get_exchange_rates()
     converted_balances = [
         {
             "code": code,
@@ -212,7 +212,7 @@ def account():
 
     raw_other_accounts = database_util.get_other_basic_user_data(user)
 
-    raw_transactions: list[util.Transaction] = database_util.get_user_transactions(user)
+    raw_transactions: list[utility.Transaction] = database_util.get_user_transactions(user)
 
     other_accounts = [dict(row) for row in raw_other_accounts]
     processed_transactions = []
@@ -227,7 +227,7 @@ def account():
             direction = "incoming"
             opposing_user_public_key = transaction.sender_public_key
 
-        counterparty_user: util.User | None = database_util.load_user_by_public_key(opposing_user_public_key)
+        counterparty_user: utility.User | None = database_util.load_user_by_public_key(opposing_user_public_key)
 
         counterparty_name = counterparty_user.name if counterparty_user else "Unbekannt"
 
@@ -272,7 +272,7 @@ def api_balance():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    rates = util.get_exchange_rates()
+    rates = utility.get_exchange_rates()
     conversions = {
         code: {
             "name": data["name"],
@@ -329,11 +329,11 @@ def api_transfer():
     if not recipient_public_key:
         return jsonify({"error": "Bitte wählen Sie ein Zielkonto."}), 400
 
-    sender: util.User = database_util.load_user(session["user_id"])
+    sender: utility.User = database_util.load_user(session["user_id"])
     if not sender:
         return jsonify({"error": "Absenderkonto wurde nicht gefunden."}), 404
 
-    receiver: util.User | None = database_util.load_user_by_public_key(recipient_public_key)
+    receiver: utility.User | None = database_util.load_user_by_public_key(recipient_public_key)
 
 
     if sender.public_key == recipient_public_key:
@@ -379,7 +379,7 @@ def api_transactions():
     if not user:
         return jsonify({"error": "Unauthorized"}), 401
 
-    raw_transactions: list[util.Transaction] = database_util.get_user_transactions(user)
+    raw_transactions: list[utility.Transaction] = database_util.get_user_transactions(user)
 
     processed_transactions = []
     for transaction in raw_transactions:
@@ -393,7 +393,7 @@ def api_transactions():
             direction = "incoming"
             opposing_user_public_key = transaction.sender_public_key
 
-        counterparty_user: util.User | None = database_util.load_user_by_public_key(opposing_user_public_key)
+        counterparty_user: utility.User | None = database_util.load_user_by_public_key(opposing_user_public_key)
 
         counterparty_name = counterparty_user.name if counterparty_user else "Unbekannt"
 
