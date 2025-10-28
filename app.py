@@ -481,6 +481,9 @@ def process_transaction_2(transaction_id):
     amount_as_string: str = body.get("amount", None)
     received_signature: str = body.get("signature", None)
 
+    app.logger.info("Received ledger:")
+    app.logger.info(str(body))
+
     if sender is None or receiver is None or amount_as_string is None or received_signature is None:
         return jsonify({"error": "Missing information"}), 400
     amount: float = 0.0
