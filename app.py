@@ -473,6 +473,32 @@ def api_chat():
 
 
 
+@app.put("/api/transactions/{<transaction_id>}")
+def process_transaction_2(transaction_id):
+    body: dict[str, any] = json.loads(request.data)
+    sender: str = body.get("senderPublicKey", None)
+    receiver: str = body.get("receiverPublicKey", None)
+    amount_as_string: str = body.get("amount", None)
+    received_signature: str = body.get("signature", None)
+
+    if sender is None or receiver is None or amount_as_string is None or received_signature is None:
+        return jsonify({"error": "Missing information"}), 400
+    amount: float = 0.0
+    try:
+        amount = float(amount_as_string)
+    except:
+        return jsonify({"error": "Invalid amount format"}), 400
+
+    if amount <= 0:
+        return jsonify({"error": "Amount must be positive"}), 400
+
+
+    calculated_signature: str = build_signature(sender, receiver, amount_as_string)
+    if received_signature != calculated_signature:
+        return jsonify({"error": "Signature does not match content!"}), 400
+
+    return jsonify({"valid": "Signature is valid!!!"}), 200
+
 @app.route("/tk/<sender>/<receiver>/<amount>/<signature>", methods= ["POST"])
 def process_incoming_transaction():
     sender: str = request.view_args.get("sender", None)
