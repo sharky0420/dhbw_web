@@ -513,7 +513,7 @@ def synchronize_with_other_clients(sender_public_key, receiver_public_key, amoun
     app.logger.info("New Ledger:")
 
 
-    id = uuid.uuid3()
+    id = uuid.uuid4()
     for bank_ip in OTHER_BANK_IPS:
         full_url: str = f"http://{bank_ip}/api/transactions/txn_{str(id)}"
 
