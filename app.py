@@ -13,6 +13,7 @@ from urllib import request, parse
 from urllib.request import Request
 import urllib.request
 from http.client import HTTPResponse
+import uuid
 
 import utility
 import database_util
@@ -508,12 +509,25 @@ def synchronize_with_other_clients(sender_public_key, receiver_public_key, amoun
 
     url_path: str = f"/tx/{sender_public_key}/{receiver_public_key}/{amount}/{calculated_signature}"
 
-    for bank_ip in OTHER_BANK_IPS:
-        full_url: str = f"http://{bank_ip}{url_path}"
+    app.logger.info("#" * 10)
+    app.logger.info("New Ledger:")
 
-        req = Request(full_url, b"", method="POST")
-        app.logger.info("#" * 10)
-        app.logger.info("New Ledger:")
+
+    id = uuid.uuid3()
+    for bank_ip in OTHER_BANK_IPS:
+        full_url: str = f"http://{bank_ip}/api/transactions/txn_{str(id)}"
+
+        body: dict[str, any] = {
+            "type": "deposit",
+            "amount": str(amount),
+            "timestamp": dt.datetime.now().isoformat(),
+            "senderPublicKey": sender_public_key,
+            "receiverPublicKey": receiver_public_key,
+            "signature": calculated_signature
+        }
+
+        req = Request(full_url, json.dumps(body).encode("utf-8"), method="PUT")
+
         try:
             resp:  HTTPResponse = urllib.request.urlopen(req)
             status_code: int = resp.status
