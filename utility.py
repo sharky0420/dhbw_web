@@ -40,7 +40,6 @@ class Transaction():
     sender_public_key: str
     receiver_public_key: str
     amount: float
-    signature: str
     created_at: str | None = None
 
     @staticmethod
@@ -50,8 +49,6 @@ class Transaction():
             sender_public_key=row["sender_public_key"],
             receiver_public_key=row["receiver_public_key"],
             amount=row["amount"],
-            balance=row["balance"],
-            signature=row["signature"],
             created_at=row["created_at"]
         )
 
